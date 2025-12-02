@@ -1,0 +1,87 @@
+# Existing ignores
+/results
+/system/models
+*__pycache__*
+
+# Large files (>100MiB)
+*.tar.gz
+*.zip
+*.rar
+*.7z
+*.iso
+*.dmg
+
+# Dataset and data files (typically 10-100MB)
+*.npz
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.mat
+*.parquet
+*.feather
+
+# Model files
+*.model
+*.pt
+*.pth
+*.ckpt
+*.pth
+*.safetensors
+
+# Temporary files
+*~
+~$*
+*.tmp
+*.temp
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Log and output files
+*.log
+*.out
+*.err
+*.output
+*.result
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Cache and runtime directories
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.env
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Raw datasets
+/rawdata/
+/data/cifar-10-batcher-py
+
+# Results and outputs
+/results/
+/outputs/
+/logs/
+/checkpoints/
+/runs/
+
+# Microsoft Office temporary files
+~$*.docx
+~$*.xlsx
+~$*.pptx
