@@ -127,13 +127,50 @@ class Server(object):
 
     def aggregate_parameters(self):
         assert (len(self.uploaded_models) > 0)
+        if len(self.uploaded_models) > 3:  # Usar vetorização para múltiplos modelos
+            self.aggregate_parameters_vectorized()
+        else:
+            self.aggregate_parameters_traditional()  # Fallback para poucos modelos
+
+    def aggregate_parameters_vectorized(self):
+        """Agregação vetorizada eficiente usando GPU/CPU vector operations"""
+        assert (len(self.uploaded_models) > 0)
+
+        # Coletar todos os parâmetros em tensores achatados
+        all_params = []
+        for model in self.uploaded_models:
+            param_vector = torch.cat([p.data.flatten() for p in model.parameters()])
+            all_params.append(param_vector)
+
+        # Stack e operação vetorizada na GPU (se disponível)
+        device = next(self.global_model.parameters()).device
+        stacked_params = torch.stack(all_params).to(device)  # [num_clients, total_params]
+        weights_tensor = torch.tensor(self.uploaded_weights).to(device).unsqueeze(1)
+
+        # Agregação eficiente: soma ponderada em uma operação
+        aggregated = torch.sum(stacked_params * weights_tensor, dim=0)
+
+        # Reconstruir modelo com parâmetros agregados
+        self._reconstruct_model_from_vector(aggregated)
+
+    def aggregate_parameters_traditional(self):
+        """Método tradicional de agregação (fallback)"""
         self.global_model = copy.deepcopy(self.uploaded_models[0])
         for param in self.global_model.parameters():
             param.data.zero_()
         for w, client_model in zip(self.uploaded_weights, self.uploaded_models):
             self.add_parameters(w, client_model)
 
+    def _reconstruct_model_from_vector(self, param_vector):
+        """Reconstruir modelo a partir de vetor de parâmetros achatado"""
+        param_idx = 0
+        for param in self.global_model.parameters():
+            param_size = param.numel()
+            param.data = param_vector[param_idx:param_idx+param_size].view(param.shape)
+            param_idx += param_size
+
     def add_parameters(self, w, client_model):
+        """Método original mantido para compatibilidade"""
         for server_param, client_param in zip(self.global_model.parameters(), client_model.parameters()):
             server_param.data += client_param.data.clone() * w
 

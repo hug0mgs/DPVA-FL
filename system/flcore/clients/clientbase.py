@@ -46,10 +46,15 @@ class Client(object):
         self.loss = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate)
         self.learning_rate_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-            optimizer=self.optimizer, 
+            optimizer=self.optimizer,
             gamma=args.learning_rate_decay_gamma
         )
         self.learning_rate_decay = args.learning_rate_decay
+
+        # Para otimização adaptativa de learning rate
+        self.acc_history = []
+        self.lr_adaptation_enabled = getattr(args, 'adaptive_lr', True)
+        self.base_learning_rate = self.learning_rate
 
 
     def load_train_data(self, batch_size=None):
@@ -76,6 +81,48 @@ class Client(object):
     def update_parameters(self, model, new_params):
         for param, new_param in zip(model.parameters(), new_params):
             param.data = new_param.data.clone()
+
+    def adaptive_lr_update(self, current_acc):
+        """Ajustar learning rate adaptativamente baseado na performance"""
+        if not self.lr_adaptation_enabled:
+            return
+
+        self.acc_history.append(current_acc)
+
+        if len(self.acc_history) > 5:  # Ter histórico suficiente para análise
+            # Analisar tendência recente vs tendência anterior
+            recent_trend = np.mean(self.acc_history[-3:]) - np.mean(self.acc_history[-6:-3])
+            variance = np.var(self.acc_history[-5:])
+
+            # Ajustar LR baseado na tendência e estabilidade
+            if recent_trend > 0.01:  # Melhora significativa
+                # Aumentar LR para acelerar convergência
+                new_lr = min(self.learning_rate * 1.1, self.base_learning_rate * 2.0)
+                self._update_learning_rate(new_lr)
+            elif recent_trend < -0.005:  # Piora significativa
+                # Reduzir LR para estabilizar
+                new_lr = max(self.learning_rate * 0.85, self.base_learning_rate * 0.1)
+                self._update_learning_rate(new_lr)
+            elif variance > 0.02:  # Alta variabilidade
+                # Reduzir LR para estabilizar
+                new_lr = max(self.learning_rate * 0.9, self.base_learning_rate * 0.2)
+                self._update_learning_rate(new_lr)
+
+    def _update_learning_rate(self, new_lr):
+        """Atualizar learning rate do otimizador"""
+        if abs(new_lr - self.learning_rate) > 1e-6:  # Apenas se houver mudança significativa
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = new_lr
+            self.learning_rate = new_lr
+
+    def get_optimal_batch_size(self):
+        """Calcular batch size ótimo baseado no tamanho do dataset"""
+        base_size = self.batch_size
+        data_ratio = len(self.train_samples) / 1000  # Assumir 1000 como base
+
+        # Clientes com mais dados podem usar batches maiores
+        optimal_size = min(int(base_size * (1 + np.log(max(data_ratio, 0.1)))), 64)
+        return max(base_size // 2, optimal_size)
 
     def test_metrics(self):
         testloaderfull = self.load_test_data()
