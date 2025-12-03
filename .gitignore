@@ -2,6 +2,7 @@
 /results
 /system/models
 *__pycache__*
+tmp/
 
 # Large files (>100MiB)
 *.tar.gz

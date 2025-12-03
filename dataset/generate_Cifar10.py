@@ -4,7 +4,7 @@ import sys
 import numpy as np
 import torch
 from torchvision import datasets, transforms
-from data_utils import separate_data, split_data, save_file
+from utils.dataset_utils import separate_data, split_data, save_file
 
 # Adicione o caminho para o diretório 'upload' ao sys.path para importar data_utils
 sys.path.append(os.path.join(os.getcwd(), 'upload'))
