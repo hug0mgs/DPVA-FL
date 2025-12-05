@@ -4,7 +4,7 @@ import sys
 import numpy as np
 import torch
 from torchvision import datasets, transforms
-from utils.dataset_utils import separate_data, split_data, save_file
+from utils.data_utils import separate_data, split_data, save_file
 
 # Adicione o caminho para o diretório 'upload' ao sys.path para importar data_utils
 sys.path.append(os.path.join(os.getcwd(), 'upload'))
@@ -41,7 +41,7 @@ def generate_data(dataset_name, num_clients, alpha):
     data, num_classes = load_dataset(dataset_name)
     
     # 2. Definir caminhos de salvamento
-    base_dir = os.path.join('dataset', dataset_name, f'alpha_{alpha}')
+    base_dir = os.path.join(dataset_name, f'alpha_{alpha}')
     config_path = os.path.join(base_dir, 'config.json')
     train_path = os.path.join(base_dir, 'train')
     test_path = os.path.join(base_dir, 'test')

@@ -5,11 +5,6 @@ import numpy as np
 import torch
 from torchvision import datasets, transforms
 
-
-
-
-
-
 # Adiciona o diretório atual ao sys.path para encontrar módulos locais como data_utils
 # Isso é necessário porque o Python pode não procurar no diretório atual automaticamente.
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -33,9 +28,12 @@ def load_dataset(dataset_name):
         train_set = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
         test_set = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
         
-        # Combina os dados para particionamento
+        # Garante que targets sejam listas ou arrays antes de concatenar e converte explicitamente
+        train_targets = np.array(train_set.targets)
+        test_targets = np.array(test_set.targets)
+        
         X_combined = np.concatenate([train_set.data, test_set.data], axis=0)
-        y_combined = np.concatenate([train_set.targets, test_set.targets], axis=0)
+        y_combined = np.concatenate([train_targets, test_targets], axis=0)
         
         # Ajusta o formato para (N, C, H, W) como esperado pelo PyTorch
         X_combined = np.transpose(X_combined, (0, 3, 1, 2))
@@ -62,6 +60,10 @@ def generate_data(dataset_name, num_clients, alpha):
     # Cria os diretórios se não existirem
     os.makedirs(train_path, exist_ok=True)
     os.makedirs(test_path, exist_ok=True)
+
+    X_content, y_label = data
+    y_label = np.array(y_label) # Força ser array numpy
+    data = (X_content, y_label) # Reempacota
     
     # 3. Particionar os dados
     # Usamos 'dir' para Dirichlet e niid=True para não-IID

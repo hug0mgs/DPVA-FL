@@ -10,12 +10,14 @@ from PIL import Image
 import torch
 from collections import defaultdict
 
+print(">>> CARREGANDO DATA_UTILS MODIFICADO! <<<")
+
 # Constantes do módulo
 batch_size = 10
 train_ratio = 0.75
 
 def check(config_path, train_path, test_path, num_clients, niid=False, 
-        balance=True, partition=None, alpha=1.0):
+        balance=True, partition=None, alpha=100.0):
     if os.path.exists(config_path):
         with open(config_path, 'r') as f:
             config = ujson.load(f)
@@ -35,7 +37,7 @@ def check(config_path, train_path, test_path, num_clients, niid=False,
         os.makedirs(dir_path)
     return False
 
-def separate_data(data, num_clients, num_classes, niid=False, balance=False, partition=None, class_per_client=None, alpha=1.0):
+def separate_data(data, num_clients, num_classes, niid=False, balance=False, partition=None, class_per_client=None, alpha=100.0):
     X = [[] for _ in range(num_clients)]
     y = [[] for _ in range(num_clients)]
     statistic = [[] for _ in range(num_clients)]
@@ -81,54 +83,24 @@ def separate_data(data, num_clients, num_classes, niid=False, balance=False, par
         K = num_classes
         N = len(dataset_label)
         try_cnt = 1
-        idx_batch = [[] for _ in range(num_clients)]
-        # A lógica de loop original não era executada para alpha = 0.0, causando o erro.
-        # A lógica foi reestruturada para tratar alpha = 0.0 separadamente.
-        if alpha == 0.0:
-            # Assign classes to clients cyclically (Extreme Non-IID: alpha=0.0)
-            # Ensure all clients receive at least one class, even if it means duplicating classes.
-            
-            # 1. Create a list of all classes, repeated if necessary to cover all clients
-            all_classes = list(range(K))
-            
-            # If num_clients > K, we need to repeat the classes to ensure all clients get data
-            if num_clients > K:
-                # Calculate how many times to repeat the class list
-                repeat_factor = (num_clients + K - 1) // K
-                all_classes = all_classes * repeat_factor
-            
-            # 2. Distribute the classes cyclically to clients
-            client_classes = [[] for _ in range(num_clients)]
-            for i, class_id in enumerate(all_classes):
-                if i < num_clients: # Only assign one class per client for extreme non-IID
-                    client_classes[i].append(class_id)
-            
-            # 3. Allocate the data indices
-            for client_idx, classes in enumerate(client_classes):
-                client_indices = []
-                for k in classes:
-                    idx_k = np.where(dataset_label == k)[0]
-                    client_indices.extend(idx_k)
-                
-                # Only shuffle if there are indices to shuffle
-                if client_indices:
-                    np.random.shuffle(client_indices)
-                
-                idx_batch[client_idx] = client_indices
-        else:
-            # Lógica para alpha > 0.0
-            while min_size < least_samples:
-                if try_cnt > 1:
-                    print(f'Tamanho dos dados do cliente não atende ao requisito mínimo de {least_samples}. Tentando alocar novamente pela {try_cnt}ª vez.')
-                for k in range(K):
-                    idx_k = np.where(dataset_label == k)[0]
-                    np.random.shuffle(idx_k)
+        while min_size < least_samples:
+            if try_cnt > 1:
+                print(f'Tamanho dos dados do cliente não atende ao requisito mínimo de {least_samples}. Tentando alocar novamente pela {try_cnt}ª vez.')
+            idx_batch = [[] for _ in range(num_clients)]
+            for k in range(K):
+                idx_k = np.where(dataset_label == k)[0]
+                np.random.shuffle(idx_k)
+                if alpha == 0.0:
+                    proportions = np.zeros(num_clients)
+                    proportions[k % num_clients] = 1.0
+                else:
                     proportions = np.random.dirichlet(np.repeat(alpha, num_clients))
-                    proportions = proportions/proportions.sum()
-                    proportions = (np.cumsum(proportions)*len(idx_k)).astype(int)[:-1]
-                    idx_batch = [idx_j + idx.tolist() for idx_j,idx in zip(idx_batch,np.split(idx_k,proportions))]
+                proportions = np.array([p*(len(idx_j)<N/num_clients) for p,idx_j in zip(proportions,idx_batch)])
+                proportions = proportions/proportions.sum()
+                proportions = (np.cumsum(proportions)*len(idx_k)).astype(int)[:-1]
+                idx_batch = [idx_j + idx.tolist() for idx_j,idx in zip(idx_batch,np.split(idx_k,proportions))]
                 min_size = min([len(idx_j) for idx_j in idx_batch]) if idx_batch and all(idx_batch) else 0
-                try_cnt += 1
+            try_cnt += 1
         for j in range(num_clients):
             dataidx_map[j] = idx_batch[j]
     else:
@@ -166,7 +138,7 @@ def split_data(X, y):
     return train_data, test_data
 
 def save_file(config_path, train_path, test_path, train_data, test_data, num_clients, 
-                num_classes, statistic, niid=False, balance=True, partition=None, alpha=1.0):
+                num_classes, statistic, niid=False, balance=True, partition=None, alpha=100.0):
     config = {
         'num_clients': num_clients, 
         'num_classes': num_classes, 
@@ -190,35 +162,51 @@ def save_file(config_path, train_path, test_path, train_data, test_data, num_cli
     print("Geração do dataset finalizada.\n")
 
 # =================================================================================================
-# ================================ AQUI ESTÁ A PRINCIPAL MUDANÇA ==================================
+# FUNÇÕES DE LEITURA CORRIGIDAS
 # =================================================================================================
-def read_data(dataset, idx, is_train=True):
+
+def read_data(dataset, idx, alpha=None, is_train=True):
     """
-    Lê os dados de um cliente específico, agora procurando dentro da pasta do dataset.
+    Lê os dados de um cliente específico.
+    Se 'alpha' for fornecido, procura na subpasta 'alpha_X.X'.
+    Caso contrário, procura no caminho padrão.
     """
+    # Define o nome da pasta do alpha (ex: "alpha_0.0") ou vazio se não houver
+    alpha_folder = f"alpha_{alpha}" if alpha is not None else ""
+
+    # Ajuste do caminho relativo: assume que main.py roda em 'system/' e dataset está em '../dataset/' ou 'dataset/'
+    # Tenta encontrar a pasta 'dataset' subindo um nível ou no diretório atual
+    base_data_path = os.path.join('../dataset', dataset)
+    if not os.path.exists(base_data_path):
+         base_data_path = os.path.join('dataset', dataset) # Tenta local se não achar relativo
+
     if is_train:
-        data_dir = os.path.join('../dataset', dataset, 'train/')
+        data_dir = os.path.join(base_data_path, alpha_folder, 'train')
     else:
-        data_dir = os.path.join('../dataset', dataset, 'test/')
+        data_dir = os.path.join(base_data_path, alpha_folder, 'test')
 
     file_path = os.path.join(data_dir, f"{idx}.npz")
     
+    # print(f"DEBUG: Tentando ler arquivo em: {os.path.abspath(file_path)}") # Descomente para debugar
+
     if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Arquivo de dados não encontrado: {file_path}. Verifique se o dataset '{dataset}' foi gerado.")
+        raise FileNotFoundError(f"Arquivo de dados não encontrado: {file_path}. Verifique se o dataset '{dataset}' foi gerado com alpha={alpha}.")
 
     with open(file_path, 'rb') as f:
         data = np.load(f, allow_pickle=True)['data'].tolist()
     return data
-# =================================================================================================
 
-def read_client_data(dataset, idx, is_train=True, few_shot=0):
-    data = read_data(dataset, idx, is_train)
+def read_client_data(dataset, idx, alpha=None, is_train=True, few_shot=0):
+    # Passa o argumento 'alpha' adiante
+    data = read_data(dataset, idx, alpha=alpha, is_train=is_train)
+    
     if "News" in dataset:
         data_list = process_text(data)
     elif "Shakespeare" in dataset:
         data_list = process_Shakespeare(data)
     else:
         data_list = process_image(data)
+        
     if is_train and few_shot > 0:
         shot_cnt_dict = defaultdict(int)
         data_list_new = []
@@ -229,6 +217,8 @@ def read_client_data(dataset, idx, is_train=True, few_shot=0):
                 shot_cnt_dict[label] += 1
         data_list = data_list_new
     return data_list
+
+# =================================================================================================
 
 def process_image(data):
     X = torch.Tensor(data['x']).type(torch.float32)
